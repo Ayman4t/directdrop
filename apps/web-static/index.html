@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>DirectDrop — peer-to-peer file sharing</title>
+<meta name="theme-color" content="#0b1020">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<style>
+:root{--bg:#0b1020;--card:#141b34;--fg:#e8ecff;--mut:#8b95b8;--acc:#5b8cff;--ok:#34d399;--bad:#f87171}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% 25%,#18224a,var(--bg) 70%) fixed;color:var(--fg);font:15px/1.4 system-ui,sans-serif;padding:max(env(safe-area-inset-top),0px) 16px max(env(safe-area-inset-bottom),16px)}
+header,main{max-width:720px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 0}
+h1{font-size:20px;margin:0}.grp{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mut{color:var(--mut)}.c{text-align:center}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:9px 14px;font:inherit;cursor:pointer}.btn.alt{background:#232c52}.btn.bad{background:var(--bad)}
+input.code,#lnk{background:#0f1530;border:1px solid #2a3560;color:var(--fg);border-radius:10px;padding:9px;font:inherit}
+input.code{width:104px;letter-spacing:3px;text-align:center}
+#radar{position:relative;width:100%;max-width:560px;aspect-ratio:1;margin:0 auto;overflow:hidden}
+.ring{position:absolute;inset:0;margin:auto;border:1px solid #5b8cff33;border-radius:50%}
+.pulse{width:100%;height:100%;border-color:var(--acc);animation:pulse 3s ease-out infinite}
+@keyframes pulse{from{transform:scale(.1);opacity:.8}to{transform:scale(1);opacity:0}}
+.sweep{position:absolute;inset:4%;border-radius:50%;background:conic-gradient(from 0deg,#5b8cff00 75%,#5b8cff40);animation:spin 4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#me,.peer{position:absolute;transform:translate(-50%,-50%);text-align:center;width:104px}
+#me{left:50%;top:50%}.peer{cursor:pointer;transition:transform .15s}
+.av{width:56px;height:56px;border-radius:50%;background:var(--card);border:2px solid #2a3560;display:grid;place-items:center;margin:0 auto 4px;transition:.15s}
+#me .av{background:var(--acc);border-color:#fff3}
+.peer:hover .av{border-color:var(--acc)}
+.peer.drop .av{border-color:var(--ok);box-shadow:0 0 0 8px #34d39933;transform:scale(1.15)}
+.name{font-size:13px;font-weight:600}.badge{font-size:11px;color:var(--mut)}
+#peers{position:absolute;inset:0}
+.card{background:var(--card);border-radius:12px;padding:10px 12px;margin-top:8px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.row span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .btn{padding:2px 8px}
+.bar{height:6px;background:#0f1530;border-radius:3px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+.modal{position:fixed;inset:0;background:#000b;display:grid;place-items:center;padding:16px;z-index:9}
+.sheet{background:var(--card);border-radius:16px;padding:20px;max-width:380px;width:100%;text-align:center}
+.sheet h2{margin:0 0 10px;font-size:18px}.pin{font-size:34px;letter-spacing:6px;font-weight:700;margin:6px 0}
+#qr{display:grid;place-items:center;margin:10px 0;background:#fff;border-radius:10px;padding:10px;width:fit-content;margin-inline:auto}#qr:empty{display:none}
+#lnk{width:100%;margin-bottom:10px;font-size:12px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#232c52;padding:10px 16px;border-radius:10px;z-index:10;max-width:90%}
+</style>
+</head>
+<body>
+<header>
+  <h1>DirectDrop</h1>
+  <div class="grp">
+    <span id="st" class="mut">Connecting…</span>
+    <button class="btn alt" id="mk">Create private room</button>
+    <input class="code" id="jc" maxlength="6" inputmode="numeric" placeholder="123456" aria-label="Room code">
+    <button class="btn alt" id="jn">Join</button>
+  </div>
+</header>
+<main>
+  <div id="radar">
+    <div class="sweep"></div>
+    <div class="ring" style="width:36%;height:36%"></div><div class="ring" style="width:66%;height:66%"></div><div class="ring" style="width:96%;height:96%"></div>
+    <div class="ring pulse"></div><div class="ring pulse" style="animation-delay:1s"></div><div class="ring pulse" style="animation-delay:2s"></div>
+    <div id="me"><div class="av" id="meav"></div><div class="name" id="men"></div><div class="badge" id="mes"></div></div>
+    <div id="peers"></div>
+  </div>
+  <p id="empty" class="mut c">Looking for devices… open DirectDrop on another device on this network, or create a private room to connect across networks.</p>
+  <p class="mut c" style="font-size:12px">Tap a device (or drop files on it) to send. Files go straight device-to-device, encrypted (DTLS), never stored on a server.</p>
+  <div id="list"></div>
+</main>
+<input type="file" id="file" multiple hidden>
+
+<div class="modal" id="inc" hidden><div class="sheet"><h2>Incoming file</h2><p id="incTxt"></p><button class="btn" id="acc">Accept</button> <button class="btn bad" id="dec">Decline</button></div></div>
+<div class="modal" id="room" hidden><div class="sheet"><h2>Private room</h2><div class="pin" id="pin"></div><div id="qr"></div>
+  <p class="mut" style="font-size:13px">Share this code or link. Anyone who opens it joins your room.</p>
+  <input id="lnk" readonly><button class="btn" id="cp">Copy link</button> <button class="btn alt" id="rc">Close</button></div></div>
+<div id="toast" hidden></div>
+
+<script>
+const WS_URL = window.DIRECTDROP_WS || `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`;
+const ICE = {iceServers:[{urls:'stun:stun.l.google.com:19302'}]}; // add a TURN server here for strict networks
+const CHUNK=65536, HIGH=1048576, LOW=262144;
+const $=s=>document.querySelector(s);
+const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+const uid=()=>crypto.randomUUID?crypto.randomUUID():Array.from({length:4},()=>Math.random().toString(16).slice(2,10)).join('-');
+const fmt=n=>n>=1e9?(n/1e9).toFixed(2)+' GB':n>=1e6?(n/1e6).toFixed(1)+' MB':Math.max(1,Math.round(n/1e3))+' KB';
+const ICONS={laptop:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',phone:'<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',tablet:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M11 18h2"/>'};
+function icon(t){const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  for(const [k,v] of Object.entries({viewBox:'0 0 24 24',width:26,height:26,fill:'none',stroke:'currentColor','stroke-width':1.8,'stroke-linecap':'round'}))s.setAttribute(k,v);
+  s.innerHTML=ICONS[t]||ICONS.laptop;return s}
+let toastT;function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,3500)}
+const setStatus=t=>$('#st').textContent=t;
+
+// ---------- identity ----------
+const ua=navigator.userAgent,pk=a=>a[Math.floor(Math.random()*a.length)];
+const os0=/iPhone|iPad|iPod/.test(ua)?'iOS':/Android/.test(ua)?'Android':/Windows/.test(ua)?'Windows':/Mac/.test(ua)?'macOS':/Linux/.test(ua)?'Linux':'Unknown';
+const browser=/Edg\//.test(ua)?'Edge':/OPR\//.test(ua)?'Opera':/Firefox\//.test(ua)?'Firefox':/Chrome\//.test(ua)?'Chrome':/Safari\//.test(ua)?'Safari':'Browser';
+const ipad=os0==='macOS'&&navigator.maxTouchPoints>1, os=ipad?'iPadOS':os0;
+const deviceType=/iPad|Tablet/.test(ua)||ipad||(/Android/.test(ua)&&!/Mobile/.test(ua))?'tablet':/iPhone|Android|Mobi/.test(ua)?'phone':'laptop';
+let base;try{base=localStorage.getItem('dd:name')}catch{}
+if(!base){base=pk(['Swift','Silent','Brave','Calm','Clever','Bright','Quiet','Lucky','Noble','Rapid'])+' '+pk(['Falcon','Panther','Otter','Fox','Lynx','Heron','Wolf','Orca','Raven','Tiger']);try{localStorage.setItem('dd:name',base)}catch{}}
+const me={id:uid(),name:`${base} - ${browser} on ${os}`,deviceType,os};
+$('#meav').append(icon(deviceType));$('#men').textContent=base+' (you)';$('#mes').textContent=`${browser} on ${os}`;
+
+// ---------- signaling ----------
+let ws,roomPin=(location.pathname.match(/^\/join\/(\d{6})$/)||[])[1]||null,peers=new Map();
+const state=new Map(),conns=new Map(),tx=new Map(),rx=new Map(),inbox=[];let target=null,shared=null;
+const send=m=>ws&&ws.readyState===1&&ws.send(JSON.stringify(m));
+function connectWS(){
+  me.id=uid(); // fresh id per socket avoids duplicate-id races on reconnect
+  ws=new WebSocket(WS_URL);
+  ws.onopen=()=>send({type:'join',peerId:me.id,peer:{name:me.name,deviceType:me.deviceType,os:me.os},customRoom:roomPin||undefined});
+  ws.onmessage=e=>{try{onSig(JSON.parse(e.data))}catch{}};
+  ws.onclose=()=>{peers.clear();render();setStatus('Reconnecting…');setTimeout(connectWS,2000)};
+}
+function switchRoom(pin){
+  roomPin=pin;history.replaceState(null,'',pin?'/join/'+pin:'/');
+  ws.onclose=null;ws.close();peers.clear();[...conns.keys()].forEach(closeConn);render();connectWS();
+}
+function onSig(m){
+  switch(m.type){
+    case 'peers':peers=new Map(m.peers.map(p=>[p.id,p]));setStatus(m.room==='local'?'Local network':'Room '+m.room);render();break;
+    case 'peer-joined':peers.set(m.peer.id,m.peer);render();break;
+    case 'peer-disconnected':peers.delete(m.peerId);closeConn(m.peerId);render();break;
+    case 'room-created':switchRoom(m.pin);showRoom(m.pin);break;
+    case 'error':toast(m.message);break;
+    case 'webrtc-offer':case 'webrtc-answer':case 'ice-candidate':handleSignal(m.from,m.type,m.payload).catch(()=>{});
+  }
+}
+
+// ---------- WebRTC ----------
+function mk(id){
+  const c={pc:new RTCPeerConnection(ICE),pending:[]};
+  c.pc.onicecandidate=e=>e.candidate&&send({type:'ice-candidate',to:id,payload:e.candidate.toJSON()});
+  c.pc.ondatachannel=e=>wire(id,e.channel);
+  c.pc.onconnectionstatechange=()=>{if(['failed','closed'].includes(c.pc.connectionState)&&conns.get(id)===c)closeConn(id)};
+  conns.set(id,c);return c;
+}
+function wire(id,ch){
+  ch.binaryType='arraybuffer';ch.bufferedAmountLowThreshold=LOW;conns.get(id).ch=ch;
+  ch.onmessage=e=>{try{typeof e.data==='string'?onCtl(id,JSON.parse(e.data)):onChunk(id,e.data)}catch{}};
+  ch.onclose=()=>{const c=conns.get(id);if(c&&c.ch===ch)closeConn(id)};
+}
+function closeConn(id){
+  const c=conns.get(id);if(!c)return;conns.delete(id);
+  try{c.ch&&c.ch.close();c.pc.close()}catch{}
+  const t=tx.get(id);if(t)t.ac.abort();
+  if(rx.has(id))endRx(id,'Connection lost',true);
+  for(let i=inbox.length;i--;)if(inbox[i].id===id)inbox.splice(i,1);
+  nextOffer();state.delete(id);
+}
+async function openChan(id){
+  const e=conns.get(id);if(e&&e.ch&&e.ch.readyState==='open')return e.ch;
+  closeConn(id);const c=mk(id),ch=c.pc.createDataChannel('directdrop');wire(id,ch);
+  const ready=new Promise((ok,no)=>{const t=setTimeout(()=>no(new Error('Could not connect to device')),20000);ch.onopen=()=>{clearTimeout(t);ok(ch)}});
+  await c.pc.setLocalDescription(await c.pc.createOffer());
+  send({type:'webrtc-offer',to:id,payload:c.pc.localDescription});
+  return ready;
+}
+const flush=async c=>{for(const x of c.pending.splice(0))await c.pc.addIceCandidate(x).catch(()=>{})};
+async function handleSignal(from,type,p){
+  if(type==='webrtc-offer'){
+    closeConn(from);const c=mk(from);await c.pc.setRemoteDescription(p);await flush(c);
+    await c.pc.setLocalDescription(await c.pc.createAnswer());
+    send({type:'webrtc-answer',to:from,payload:c.pc.localDescription});return;
+  }
+  const c=conns.get(from);if(!c)return;
+  if(type==='webrtc-answer'){await c.pc.setRemoteDescription(p);await flush(c)}
+  else if(c.pc.remoteDescription)await c.pc.addIceCandidate(p).catch(()=>{});
+  else c.pending.push(p); // trickle ICE can arrive before the SDP
+}
+function sendCtl(id,m){const c=conns.get(id);if(c&&c.ch&&c.ch.readyState==='open')c.ch.send(JSON.stringify(m))}
+
+// ---------- sending (64 KB chunks + backpressure) ----------
+async function sendFiles(id,files){
+  if(tx.has(id))return toast('A transfer to this device is already running');
+  const t={ac:new AbortController(),decide:null};tx.set(id,t);setBadge(id,'Connecting…');let row;
+  try{
+    const ch=await openChan(id);
+    for(const f of files){
+      const meta={type:'file-meta',id:uid(),name:f.name,size:f.size,mimeType:f.type||'application/octet-stream',totalChunks:Math.ceil(f.size/CHUNK)};
+      row=addRow('↑ '+f.name,()=>t.ac.abort());ch.send(JSON.stringify(meta));setBadge(id,'Waiting…');
+      const ok=await new Promise((res,rej)=>{t.decide=res;t.ac.signal.addEventListener('abort',()=>rej(new Error('Cancelled')),{once:true})});
+      if(!ok){row.done('Declined',true);continue}
+      setBadge(id,'Sending…');await stream(ch,f,meta.id,t.ac.signal,row.set);row.done('Sent');
+    }
+  }catch(e){if(t.ac.signal.aborted)sendCtl(id,{type:'abort-send'});else closeConn(id);row?row.done(e.message,true):toast(e.message)}
+  finally{tx.delete(id);state.delete(id);render()}
+}
+async function stream(ch,f,id,sig,prog){
+  let off=0,t=performance.now(),b=0;
+  while(off<f.size){
+    if(sig.aborted||ch.readyState!=='open')throw new Error('Transfer stopped');
+    if(ch.bufferedAmount>HIGH)await new Promise((ok,no)=>{ // pause until buffer drains below 256 KB
+      const done=()=>{ch.removeEventListener('bufferedamountlow',y);ch.removeEventListener('close',n);sig.removeEventListener('abort',n)};
+      const y=()=>{done();ok()},n=()=>{done();no(new Error('Transfer stopped'))};
+      ch.addEventListener('bufferedamountlow',y);ch.addEventListener('close',n);sig.addEventListener('abort',n)});
+    const buf=await f.slice(off,off+CHUNK).arrayBuffer();ch.send(buf);off+=buf.byteLength;
+    const now=performance.now();if(now-t>=250){prog(off,f.size,(off-b)/(now-t)*1000);t=now;b=off}
+  }
+  ch.send(JSON.stringify({type:'file-end',id}));prog(f.size,f.size,0);
+}
+
+// ---------- receiving ----------
+function onCtl(id,m){
+  const t=tx.get(id);
+  if(m.type==='file-meta'){if(rx.has(id))return sendCtl(id,{type:'decline'});inbox.push({id,meta:m});if($('#inc').hidden)nextOffer()}
+  else if(m.type==='accept'&&t&&t.decide)t.decide(true);
+  else if(m.type==='decline'&&t&&t.decide)t.decide(false);
+  else if(m.type==='abort-recv'&&t)t.ac.abort();
+  else if(m.type==='abort-send')endRx(id,'Cancelled by sender',true);
+  else if(m.type==='file-end')finishRx(id);
+}
+function nextOffer(){
+  const o=inbox[0],m=$('#inc');if(!o){m.hidden=true;return}
+  const p=peers.get(o.id);
+  $('#incTxt').textContent=`${p?p.name.split(' - ')[0]:'A device'} wants to send you “${o.meta.name}” (${fmt(o.meta.size)})`;m.hidden=false;
+}
+function decline(){const o=inbox.shift();if(o)sendCtl(o.id,{type:'decline',id:o.meta.id});nextOffer()}
+$('#dec').onclick=decline;
+$('#acc').onclick=async()=>{
+  const o=inbox[0];if(!o)return;let w=null;
+  if(window.showSaveFilePicker)try{w=await(await showSaveFilePicker({suggestedName:o.meta.name})).createWritable()}catch(e){if(e.name==='AbortError')return decline()}
+  if(inbox[0]!==o)return;inbox.shift();
+  const row=addRow('↓ '+o.meta.name,()=>{sendCtl(o.id,{type:'abort-recv'});endRx(o.id,'Cancelled',true)});
+  rx.set(o.id,{meta:o.meta,n:0,chunks:[],w,q:Promise.resolve(),row,t:performance.now(),b:0});
+  sendCtl(o.id,{type:'accept',id:o.meta.id});nextOffer();
+};
+function onChunk(id,buf){
+  const r=rx.get(id);if(!r)return;r.n+=buf.byteLength;
+  if(r.w)r.q=r.q.then(()=>r.w.write(buf));else r.chunks.push(buf); // disk stream when supported, else RAM
+  const now=performance.now();if(now-r.t>=250){r.row.set(r.n,r.meta.size,(r.n-r.b)/(now-r.t)*1000);r.t=now;r.b=r.n}
+}
+async function finishRx(id){
+  const r=rx.get(id);if(!r)return;rx.delete(id);
+  try{
+    if(r.n!==r.meta.size)throw new Error(`Incomplete (${r.n}/${r.meta.size} bytes)`);
+    if(r.w){await r.q;await r.w.close()}
+    else{const url=URL.createObjectURL(new Blob(r.chunks,{type:r.meta.mimeType}));
+      const a=Object.assign(document.createElement('a'),{href:url,download:r.meta.name});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000)}
+    r.row.set(r.meta.size,r.meta.size,0);r.row.done('Received');
+  }catch(e){r.row.done(e.message,true)}
+}
+function endRx(id,msg,bad){const r=rx.get(id);if(!r)return;rx.delete(id);r.chunks=[];r.q.catch(()=>{}).then(()=>r.w&&r.w.abort()).catch(()=>{});r.row.done(msg,bad)}
+
+// ---------- UI ----------
+function addRow(label,onCancel){
+  const r=el('div','card'),top=el('div','row'),stat=el('span','mut','0%'),bar=el('div','bar'),fill=el('i'),x=el('button','btn alt','✕');
+  x.onclick=onCancel;top.append(el('span','',label),stat,x);bar.append(fill);r.append(top,bar);$('#list').prepend(r);
+  return{set:(b,t,s)=>{const p=t?Math.round(b/t*100):100;fill.style.width=p+'%';stat.textContent=p+'%'+(s?` · ${(s/1e6).toFixed(1)} MB/s`:'')},
+    done:(m,bad)=>{x.remove();stat.textContent=m;stat.style.color=bad?'var(--bad)':'var(--ok)';if(!bad)fill.style.width='100%'}};
+}
+function setBadge(id,t){state.set(id,t);render()}
+function render(){
+  const box=$('#peers');box.replaceChildren();const list=[...peers.values()],n=list.length;
+  list.forEach((p,i)=>{
+    const a=-Math.PI/2+i*2*Math.PI/n+(n===1?Math.PI/4:0),d=el('div','peer'),av=el('div','av'),[nm,...rest]=p.name.split(' - ');
+    d.style.left=50+36*Math.cos(a)+'%';d.style.top=50+36*Math.sin(a)+'%';av.append(icon(p.deviceType));
+    d.append(av,el('div','name',nm),el('div','badge',state.get(p.id)||rest.join(' - ')||'Ready'));
+    d.onclick=()=>{if(shared&&shared.length){sendFiles(p.id,shared);shared=null}else{target=p.id;$('#file').click()}};
+    d.ondragover=e=>{e.preventDefault();d.classList.add('drop')};d.ondragleave=()=>d.classList.remove('drop');
+    d.ondrop=e=>{e.preventDefault();d.classList.remove('drop');if(e.dataTransfer.files.length)sendFiles(p.id,[...e.dataTransfer.files])};
+    box.append(d);
+  });
+  $('#empty').hidden=n>0;
+}
+$('#file').onchange=e=>{if(target&&e.target.files.length)sendFiles(target,[...e.target.files]);e.target.value=''};
+addEventListener('dragover',e=>e.preventDefault());addEventListener('drop',e=>e.preventDefault());
+$('#mk').onclick=()=>send({type:'create-room'});
+$('#jn').onclick=()=>{const c=$('#jc').value.trim();/^\d{6}$/.test(c)?(switchRoom(c),$('#jc').value=''):toast('Enter the 6-digit room code')};
+function showRoom(pin){
+  const link=location.origin+'/join/'+pin;$('#pin').textContent=pin;$('#lnk').value=link;$('#qr').replaceChildren();
+  if(window.QRCode)new QRCode($('#qr'),{text:link,width:160,height:160});$('#room').hidden=false;
+}
+$('#rc').onclick=()=>$('#room').hidden=true;
+$('#cp').onclick=async()=>{try{await navigator.clipboard.writeText($('#lnk').value)}catch{$('#lnk').select();document.execCommand('copy')}toast('Link copied')};
+
+// ---------- PWA: service worker + Web Share Target ----------
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+(async()=>{
+  if(!location.search.includes('shared=1')||!window.caches)return;
+  const c=await caches.open('dd-share'),reqs=await c.keys();
+  shared=await Promise.all(reqs.map(async r=>{const res=await c.match(r),b=await res.blob();return new File([b],decodeURIComponent(res.headers.get('X-Name')||'file'),{type:b.type})}));
+  for(const r of reqs)await c.delete(r);history.replaceState(null,'',roomPin?'/join/'+roomPin:'/');
+  if(shared.length)toast(`Tap a device to send ${shared.length} shared file(s)`);
+})();
+connectWS();render();
+</script>
+</body>
+</html>
